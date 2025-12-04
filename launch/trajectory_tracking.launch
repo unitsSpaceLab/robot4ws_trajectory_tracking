@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="csv_path" default="$(find robot4ws_trajectory_tracking)/config/waypoints_rampa.csv"/>
+    <arg name="tracked_link" default="Archimede::Archimede_base_link"/>
+    <arg name="kinematic_mode" default="symmetric_ackermann"/>
+
+    <node pkg="robot4ws_trajectory_tracking" type="trajectory_tracker_node" name="trajectory_tracker" output="screen">
+        <rosparam file="$(find robot4ws_trajectory_tracking)/config/params.yaml" command="load"/>
+        <param name="csv_path" value="$(arg csv_path)"/>
+        <param name="tracked_link" value="$(arg tracked_link)"/>
+        <param name="kinematic_mode" value="$(arg kinematic_mode)"/>
+    </node>
+</launch>
