@@ -40,6 +40,8 @@
 // 5. Loop until the goal is reached.
 
 
+// !! the min and max lookahead must be chosen carefully + PID yaw must be reduced in case of rough terrain. 
+
 // SIMPLE PID
 >>>>>>> 47ba6c3... updating
 struct PID {
