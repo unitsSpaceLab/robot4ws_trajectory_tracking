@@ -11,11 +11,6 @@
 #include <cmath>
 #include <algorithm>
 
-<<<<<<< HEAD
-//=============================================================================
-// SIMPLE PID
-//=============================================================================
-=======
 
 
 // Pure Pursuit Algorithm:
@@ -43,7 +38,6 @@
 // !! the min and max lookahead must be chosen carefully + PID yaw must be reduced in case of rough terrain. 
 
 // SIMPLE PID
->>>>>>> 47ba6c3... updating
 struct PID {
     double kp, kd, ki;
     double integral = 0.0;
@@ -63,13 +57,7 @@ struct PID {
     void resetIntegral() { integral = 0.0; }
 };
 
-<<<<<<< HEAD
-//=============================================================================
 // HELPERS 
-//=============================================================================
-=======
-// HELPERS 
->>>>>>> 47ba6c3... updating
 struct Point2D {
     double x, y;
     Point2D(double x_ = 0, double y_ = 0) : x(x_), y(y_) {}
@@ -178,13 +166,7 @@ std::vector<double> computeAllCurvatures(const std::vector<Point2D>& wp) {
     return curv;
 }
 
-<<<<<<< HEAD
-//=============================================================================
 // MAIN NODE
-//=============================================================================
-=======
-// MAIN NODE
->>>>>>> 47ba6c3... updating
 class TrajectoryTracker {
 public:
     TrajectoryTracker(ros::NodeHandle& nh, ros::NodeHandle& pnh) : nh_(nh) {
@@ -201,10 +183,7 @@ public:
         pnh.param<double>("max_waypoint_spacing", max_waypoint_spacing_, 0.2);
         pnh.param<double>("target_tolerance", target_tolerance_, 0.1);
 
-<<<<<<< HEAD
-=======
         // PID gains
->>>>>>> 47ba6c3... updating
         pnh.param<double>("kp_dx", kp_dx_, 1.0);
         pnh.param<double>("kd_dx", kd_dx_, 0.0);
         pnh.param<double>("ki_dx", ki_dx_, 0.0);
@@ -260,11 +239,7 @@ public:
 
         std::vector<Point2D> raw;
         std::string line;
-<<<<<<< HEAD
-        std::getline(file, line); // skip header
-=======
         std::getline(file, line);
->>>>>>> 47ba6c3... updating
 
         while (std::getline(file, line)) {
             std::stringstream ss(line);
