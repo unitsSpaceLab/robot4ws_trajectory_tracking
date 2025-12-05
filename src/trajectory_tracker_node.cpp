@@ -326,11 +326,13 @@ public:
         state_received_ = true;
     }
 
+
     void spin() {
         ros::Rate rate(50);
         ros::Time last_time = ros::Time::now();
-        ros::Time last_progress_time = ros::Time::now();
+        ros::Time last_progress_time;
         int last_segment_for_stuck = 0;
+        bool timer_initialized = false;
 
         // Publish initial status
         if (waypoints_.empty()) {
@@ -339,19 +341,22 @@ public:
             tracking_status_ = TrackingStatus::INITIALIZED;
         }
         publishStatus();
-        //ROS_INFO("[TrajectoryTracker] Status: %s", statusToString(tracking_status_).c_str());
-
-        // Wait for state with status updates
-        while (ros::ok() && !state_received_) {
-            ros::spinOnce();
-            publishStatus();
-            rate.sleep();
-        }
-
-        //ROS_INFO("[TrajectoryTracker] Starting tracking...");     
 
         while (ros::ok()) {
             ros::spinOnce();
+
+            if (!state_received_ || waypoints_.empty()) {
+                publishStatus();
+                rate.sleep();
+                continue;
+            }
+
+            // Initialize timer only when first state received
+            if (!timer_initialized) {
+                last_progress_time = ros::Time::now();
+                last_time = ros::Time::now();
+                timer_initialized = true;
+            }
 
             ros::Time now = ros::Time::now();
             double dt = (now - last_time).toSec();
@@ -446,13 +451,13 @@ public:
             if (current_segment_ != last_segment_for_stuck) {
                 last_segment_for_stuck = current_segment_;
                 last_progress_time = ros::Time::now();
-            } else if ((ros::Time::now() - last_progress_time).toSec() > 10.0) {
+                //activate stuck detection until reaching at least the first segment
+            } else if (current_segment_ > 0 &&(ros::Time::now() - last_progress_time).toSec() > 10.0) {
                 tracking_status_ = TrackingStatus::STUCK;
                 ROS_WARN("[TrajectoryTracker] Stuck detected!");
                 geometry_msgs::Twist stop;
                 //cmd_vel_pub_.publish(stop);
                 publishStatus();
-                break;
             }
 
             // Check completion
