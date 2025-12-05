@@ -10,6 +10,16 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <gazebo_msgs/SpawnModel.h>
+
+#include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
+
+
+#include <gazebo_msgs/DeleteModel.h>
+#include <gazebo_msgs/SetModelState.h>
+
+#include <set>
 
 
 
@@ -43,6 +53,7 @@ struct PID {
     double integral = 0.0;
     double prev_error = 0.0;
     bool first = true;
+    
 
     PID(double p, double d, double i) : kp(p), kd(d), ki(i) {}
 
@@ -194,6 +205,13 @@ public:
         pnh.param<double>("kd_dyaw", kd_dyaw_, 0.05);
         pnh.param<double>("ki_dyaw", ki_dyaw_, 0.0);
 
+        // show waypoints on gazebo
+        pnh.param<bool>("show_waypoints", show_waypoints_, true);
+
+
+        // show markers on rviz
+        pnh.param<bool>("show_rviz", show_rviz_, true);
+
         // Initialize PIDs
         pid_dx_ = std::make_unique<PID>(kp_dx_, kd_dx_, ki_dx_);
         pid_dy_ = std::make_unique<PID>(kp_dy_, kd_dy_, ki_dy_);
@@ -202,6 +220,9 @@ public:
         // ROS interface
         cmd_vel_pub_ = nh.advertise<geometry_msgs::Twist>("/Archimede/cmd_vel", 1);
         link_states_sub_ = nh.subscribe("/gazebo/link_states", 1, &TrajectoryTracker::linkStatesCallback, this);
+        if (show_rviz_) {
+            marker_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/trajectory_markers", 1);
+        }
 
         // Call kinematic mode service
         setKinematicMode(kinematic_mode_);
@@ -209,6 +230,7 @@ public:
         // Load CSV if provided
         if (!csv_path_.empty()) {
             loadCSV(csv_path_);
+            //if you need to show all the nominal trajecotry (all waypoints once) on gazebo just activate this if (show_waypoints_) drawPathInGazebo();
         }
 
         ROS_INFO("[TrajectoryTracker] Initialized. Waypoints: %zu", waypoints_.size());
@@ -262,6 +284,7 @@ public:
         size_t idx = std::distance(msg->name.begin(), it);
         pose_.x = msg->pose[idx].position.x;
         pose_.y = msg->pose[idx].position.y;
+        pose_z_ = msg->pose[idx].position.z;
 
         tf2::Quaternion q(
             msg->pose[idx].orientation.x,
@@ -299,6 +322,10 @@ public:
             findClosestPointOnPath(pose_, waypoints_, closest, closestIdx, closestParam);
             current_segment_ = std::max(current_segment_, closestIdx);
 
+            if (show_waypoints_) {
+                updateGazeboMarkers(pose_z_);
+            }
+
             // Interpolate curvature
             double curv1 = curvatures_[closestIdx];
             double curv2 = curvatures_[std::min(closestIdx + 1, (int)curvatures_.size() - 1)];
@@ -311,6 +338,9 @@ public:
 
             // Find lookahead point
             Point2D lookaheadPt = findLookaheadPoint(pose_, waypoints_, current_segment_, lookahead);
+
+            // publish markers
+            if (show_rviz_) publishMarkers(lookaheadPt, closest);
 
             // Target orientation
             Point2D toLookahead = lookaheadPt - pose_;
@@ -392,6 +422,135 @@ public:
         }
     }
 
+
+    void updateGazeboMarkers(double robot_z) {
+        ros::ServiceClient spawner = nh_.serviceClient<gazebo_msgs::SpawnModel>("/gazebo/spawn_sdf_model");
+        
+        double z = robot_z + 0.5;
+        
+        // Spawn passed waypoint if not already spawned
+        if (spawned_markers_.find(current_segment_) == spawned_markers_.end()) {
+            std::string sdf = R"(
+    <?xml version="1.0"?>
+    <sdf version="1.5">
+    <model name="wp_)" + std::to_string(current_segment_) + R"(">
+        <static>true</static>
+        <link name="link">
+        <visual name="v">
+            <pose>)" + std::to_string(waypoints_[current_segment_].x) + " " + 
+                    std::to_string(waypoints_[current_segment_].y) + " " + 
+                    std::to_string(z) + R"( 0 0 0</pose>
+            <geometry><sphere><radius>0.15</radius></sphere></geometry>
+            <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        </link>
+    </model>
+    </sdf>)";
+            
+            gazebo_msgs::SpawnModel srv;
+            srv.request.model_name = "wp_" + std::to_string(current_segment_);
+            srv.request.model_xml = sdf;
+            srv.request.reference_frame = "";
+            
+            if (spawner.call(srv) && srv.response.success) {
+                spawned_markers_.insert(current_segment_);
+            }
+        }
+    }
+
+
+     // to draw all points!
+    void drawPathInGazebo() {
+        ros::ServiceClient spawner = nh_.serviceClient<gazebo_msgs::SpawnModel>("/gazebo/spawn_sdf_model");
+        spawner.waitForExistence(ros::Duration(2.0));
+        
+        std::stringstream visuals;
+        int step = std::max(1, (int)waypoints_.size() / 100);
+        
+        for (size_t i = 0; i < waypoints_.size(); i += step) {
+            visuals << R"(
+            <visual name="wp_)" << i << R"(">
+            <pose>)" << waypoints_[i].x << " " << waypoints_[i].y << R"( 10.0 0 0 0</pose>
+            <geometry><sphere><radius>0.5</radius></sphere></geometry>
+            <material><ambient>0 1 1 1</ambient><diffuse>0 1 1 1</diffuse></material>
+            </visual>)";
+        }
+        
+        std::string sdf = R"(
+    <?xml version="1.0"?>
+    <sdf version="1.5">
+    <model name="path_markers">
+        <static>true</static>
+        <link name="link">)" + visuals.str() + R"(
+        </link>
+    </model>
+    </sdf>)";
+        
+        gazebo_msgs::SpawnModel srv;
+        srv.request.model_name = "path_markers";
+        srv.request.model_xml = sdf;
+        srv.request.reference_frame = "";
+        
+        if (spawner.call(srv) && srv.response.success)
+            ROS_INFO("Path markers spawned");
+        else
+            ROS_ERROR("Spawn failed: %s", srv.response.status_message.c_str());
+    }
+
+
+    void publishMarkers(const Point2D& lookaheadPt, const Point2D& closestPt) {
+        visualization_msgs::MarkerArray markers;
+        
+        // Path (blue line)
+        visualization_msgs::Marker path;
+        path.header.frame_id = "Archimede_foot_start";
+        path.header.stamp = ros::Time::now();
+        path.ns = "path"; path.id = 0;
+        path.type = visualization_msgs::Marker::LINE_STRIP;
+        path.pose.orientation.w = 1.0;
+        path.scale.x = 0.05;
+        path.color.b = 1.0; path.color.a = 1.0;
+        for (auto& wp : waypoints_) {
+            geometry_msgs::Point p; p.x = wp.x; p.y = wp.y; p.z = 0;
+            path.points.push_back(p);
+        }
+        markers.markers.push_back(path);
+        
+        // Robot trajectory (green line)
+        trajectory_history_.push_back(pose_);
+        visualization_msgs::Marker traj = path;
+        traj.ns = "trajectory"; traj.id = 1;
+        traj.color.b = 0; traj.color.g = 1.0;
+        traj.points.clear();
+        for (auto& pt : trajectory_history_) {
+            geometry_msgs::Point p; p.x = pt.x; p.y = pt.y; p.z = 0;
+            traj.points.push_back(p);
+        }
+        markers.markers.push_back(traj);
+        
+        // Lookahead point (magenta sphere)
+        visualization_msgs::Marker la;
+        la.header = path.header;
+        la.ns = "lookahead"; la.id = 2;
+        la.type = visualization_msgs::Marker::SPHERE;
+        la.pose.position.x = lookaheadPt.x;
+        la.pose.position.y = lookaheadPt.y;
+        la.pose.orientation.w = 1.0;
+        la.scale.x = la.scale.y = la.scale.z = 0.15;
+        la.color.r = 1.0; la.color.b = 1.0; la.color.a = 1.0;
+        markers.markers.push_back(la);
+        
+        // Closest point (cyan sphere)
+        visualization_msgs::Marker cp = la;
+        cp.ns = "closest"; cp.id = 3;
+        cp.pose.position.x = closestPt.x;
+        cp.pose.position.y = closestPt.y;
+        cp.color.r = 0; cp.color.g = 1.0;
+        markers.markers.push_back(cp);
+        
+        marker_pub_.publish(markers);
+    }   
+
 private:
     ros::NodeHandle nh_;
     std::string csv_path_, tracked_link_, kinematic_mode_;
@@ -405,6 +564,14 @@ private:
     bool state_received_ = false;
     int current_segment_ = 0;
     double prev_velX_ = 0, prev_velY_ = 0;
+    bool show_waypoints_;
+    bool show_rviz_;
+    double pose_z_ = 0;
+    std::set<int> spawned_markers_;
+
+
+    ros::Publisher marker_pub_;
+    std::vector<Point2D> trajectory_history_;
 
     std::vector<Point2D> waypoints_;
     std::vector<double> curvatures_;

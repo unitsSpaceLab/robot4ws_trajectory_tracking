@@ -1,13 +1,24 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="csv_path" default="$(find robot4ws_trajectory_tracking)/config/waypoints_rampa.csv"/>
-    <arg name="tracked_link" default="Archimede::Archimede_base_link"/>
-    <arg name="kinematic_mode" default="symmetric_ackermann"/>
+  <arg name="csv_path" default="$(find robot4ws_trajectory_tracking)/config/waypoints_rampa.csv"/>
+  <arg name="tracked_link" default="Archimede::Archimede_base_link"/>
+  <arg name="kinematic_mode" default="symmetric_ackermann"/>
+  <!-- to show the runtime trajectory on rviz -->
+  <arg name="show_rviz" default="false"/>  
+  <!-- to draw the waypoint on gazzebo-->
+  <arg name="show_waypoints" default="false"/>
 
-    <node pkg="robot4ws_trajectory_tracking" type="trajectory_tracker_node" name="trajectory_tracker" output="screen">
-        <rosparam file="$(find robot4ws_trajectory_tracking)/config/params.yaml" command="load"/>
-        <param name="csv_path" value="$(arg csv_path)"/>
-        <param name="tracked_link" value="$(arg tracked_link)"/>
-        <param name="kinematic_mode" value="$(arg kinematic_mode)"/>
-    </node>
+
+  <node pkg="robot4ws_trajectory_tracking" type="trajectory_tracker_node" name="trajectory_tracker" output="screen">
+    <rosparam file="$(find robot4ws_trajectory_tracking)/config/params.yaml" command="load"/>
+    <param name="csv_path" value="$(arg csv_path)"/>
+    <param name="tracked_link" value="$(arg tracked_link)"/>
+    <param name="kinematic_mode" value="$(arg kinematic_mode)"/>
+    <param name="show_rviz" value="$(arg show_rviz)"/>
+    <param name="show_waypoints" value="$(arg show_waypoints)"/>
+  </node>
+
+  <node pkg="rviz" type="rviz" name="rviz" if="$(arg show_rviz)"
+        args="-d $(find robot4ws_trajectory_tracking)/config/trajectory.rviz"/>
 </launch>
+
