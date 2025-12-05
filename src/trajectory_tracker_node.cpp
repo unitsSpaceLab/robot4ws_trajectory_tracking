@@ -21,6 +21,8 @@
 
 #include <set>
 
+#include <thread>
+
 
 
 // Pure Pursuit Algorithm:
@@ -322,8 +324,9 @@ public:
             findClosestPointOnPath(pose_, waypoints_, closest, closestIdx, closestParam);
             current_segment_ = std::max(current_segment_, closestIdx);
 
-            if (show_waypoints_) {
-                updateGazeboMarkers(pose_z_);
+            if (show_waypoints_ && current_segment_ != last_drawn_segment_) {
+                std::thread(&TrajectoryTracker::updateGazeboMarkers, this, pose_z_).detach();
+                last_drawn_segment_ = current_segment_;
             }
 
             // Interpolate curvature
@@ -568,6 +571,7 @@ private:
     bool show_rviz_;
     double pose_z_ = 0;
     std::set<int> spawned_markers_;
+    int last_drawn_segment_ = -1;
 
 
     ros::Publisher marker_pub_;
