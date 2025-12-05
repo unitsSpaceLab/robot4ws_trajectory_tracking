@@ -22,6 +22,7 @@
 #include <set>
 
 #include <thread>
+#include <std_msgs/String.h>
 
 
 
@@ -80,6 +81,8 @@ struct Point2D {
     double norm() const { return std::sqrt(x*x + y*y); }
     double dot(const Point2D& o) const { return x*o.x + y*o.y; }
 };
+
+
 
 Point2D projectPointOnSegment(const Point2D& pt, const Point2D& p1, const Point2D& p2, double& t) {
     Point2D v = p2 - p1;
@@ -179,6 +182,27 @@ std::vector<double> computeAllCurvatures(const std::vector<Point2D>& wp) {
     return curv;
 }
 
+
+enum class TrackingStatus {
+    NOWAYPOINTFOUND,
+    INITIALIZED,
+    COMPLETE,
+    STUCK
+};
+
+
+
+std::string statusToString(TrackingStatus status) {
+    switch (status) {
+        case TrackingStatus::NOWAYPOINTFOUND:     return "no_way_point_found";
+        case TrackingStatus::INITIALIZED:     return "initialized";
+        case TrackingStatus::COMPLETE: return "complete";
+        case TrackingStatus::STUCK: return "stuck";
+        default:                       return "unknown";
+    }
+}
+
+
 // MAIN NODE
 class TrajectoryTracker {
 public:
@@ -225,6 +249,7 @@ public:
         if (show_rviz_) {
             marker_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/trajectory_markers", 1);
         }
+        status_pub_ = nh.advertise<std_msgs::String>("/trajectory_tracker/status", 1);
 
         // Call kinematic mode service
         setKinematicMode(kinematic_mode_);
@@ -303,14 +328,29 @@ public:
     void spin() {
         ros::Rate rate(50);
         ros::Time last_time = ros::Time::now();
+        ros::Time last_progress_time = ros::Time::now();
+        int last_segment_for_stuck = 0;
+
+        // Publish initial status
+        if (waypoints_.empty()) {
+            tracking_status_ = TrackingStatus::NOWAYPOINTFOUND;
+        } else {
+            tracking_status_ = TrackingStatus::INITIALIZED;
+        }
+        publishStatus();
+        //ROS_INFO("[TrajectoryTracker] Status: %s", statusToString(tracking_status_).c_str());
+
+        // Wait for state with status updates
+        while (ros::ok() && !state_received_) {
+            ros::spinOnce();
+            publishStatus();
+            rate.sleep();
+        }
+
+        //ROS_INFO("[TrajectoryTracker] Starting tracking...");     
 
         while (ros::ok()) {
             ros::spinOnce();
-
-            if (!state_received_ || waypoints_.empty()) {
-                rate.sleep();
-                continue;
-            }
 
             ros::Time now = ros::Time::now();
             double dt = (now - last_time).toSec();
@@ -402,12 +442,26 @@ public:
                 pid_dyaw_->resetIntegral();
             }
 
+            if (current_segment_ != last_segment_for_stuck) {
+                last_segment_for_stuck = current_segment_;
+                last_progress_time = ros::Time::now();
+            } else if ((ros::Time::now() - last_progress_time).toSec() > 10.0) {
+                tracking_status_ = TrackingStatus::STUCK;
+                ROS_WARN("[TrajectoryTracker] Stuck detected!");
+                geometry_msgs::Twist stop;
+                //cmd_vel_pub_.publish(stop);
+                publishStatus();
+                break;
+            }
+
             // Check completion
             double distToGoal = (waypoints_.back() - pose_).norm();
             if (current_segment_ >= (int)waypoints_.size() - 2 && distToGoal < target_tolerance_) {
+                tracking_status_ = TrackingStatus::COMPLETE;
                 ROS_INFO("[TrajectoryTracker] Complete!");
                 geometry_msgs::Twist stop;
                 cmd_vel_pub_.publish(stop);
+                publishStatus();
                 break;
             }
 
@@ -421,7 +475,9 @@ public:
             // ROS_INFO_THROTTLE(1.0, "Seg: %d/%zu | Curv: %.3f | Speed: %.2f | YawErr: %.2f",
             //     current_segment_, waypoints_.size(), curvature, velNorm * coeff, orientationError);
 
+            publishStatus();
             rate.sleep();
+ 
         }
     }
 
@@ -557,6 +613,13 @@ public:
         marker_pub_.publish(markers);
     }   
 
+    void publishStatus() {
+        std_msgs::String msg;
+        msg.data = statusToString(tracking_status_);
+        status_pub_.publish(msg);
+    }
+
+
 private:
     ros::NodeHandle nh_;
     std::string csv_path_, tracked_link_, kinematic_mode_;
@@ -588,6 +651,9 @@ private:
 
     ros::Publisher cmd_vel_pub_;
     ros::Subscriber link_states_sub_;
+
+    ros::Publisher status_pub_;
+    TrackingStatus tracking_status_ = TrackingStatus::INITIALIZED;   
 };
 
 int main(int argc, char** argv) {
