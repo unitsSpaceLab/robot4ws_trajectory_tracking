@@ -273,7 +273,7 @@ public:
             std::getline(ss, y_str, ',');
             raw.emplace_back(std::stod(x_str), std::stod(y_str));
         }
-
+        waypoints_original_ = raw;
         waypoints_ = densifyPath(raw, max_waypoint_spacing_);
         curvatures_ = computeAllCurvatures(waypoints_);
         ROS_INFO("Loaded %zu waypoints, densified to %zu", raw.size(), waypoints_.size());
@@ -361,8 +361,8 @@ public:
             double velYaw = pid_dyaw_->run(orientationError, dt);
 
 
-            ROS_INFO("Pose: (%.2f, %.2f) Yaw: %.2f | Lookahead: (%.2f, %.2f) | errX: %.2f errY: %.2f",
-                pose_.x, pose_.y, yaw_, lookaheadPt.x, lookaheadPt.y, errX, errY);
+            // ROS_INFO("Pose: (%.2f, %.2f) Yaw: %.2f | Lookahead: (%.2f, %.2f) | errX: %.2f errY: %.2f",
+            //     pose_.x, pose_.y, yaw_, lookaheadPt.x, lookaheadPt.y, errX, errY);
 
 
             // Curvature-based speed limit
@@ -418,8 +418,8 @@ public:
             cmd.angular.z = velYaw;
             cmd_vel_pub_.publish(cmd);
 
-            ROS_INFO_THROTTLE(1.0, "Seg: %d/%zu | Curv: %.3f | Speed: %.2f | YawErr: %.2f",
-                current_segment_, waypoints_.size(), curvature, velNorm * coeff, orientationError);
+            // ROS_INFO_THROTTLE(1.0, "Seg: %d/%zu | Curv: %.3f | Speed: %.2f | YawErr: %.2f",
+            //     current_segment_, waypoints_.size(), curvature, velNorm * coeff, orientationError);
 
             rate.sleep();
         }
@@ -431,19 +431,22 @@ public:
         
         double z = robot_z + 0.5;
         
-        // Spawn passed waypoint if not already spawned
-        if (spawned_markers_.find(current_segment_) == spawned_markers_.end()) {
+        // Map to original index
+        int orig_idx = current_segment_ * (int)waypoints_original_.size() / (int)waypoints_.size();
+        orig_idx = std::min(orig_idx, (int)waypoints_original_.size() - 1);
+        
+        if (spawned_markers_.find(orig_idx) == spawned_markers_.end()) {
             std::string sdf = R"(
     <?xml version="1.0"?>
     <sdf version="1.5">
-    <model name="wp_)" + std::to_string(current_segment_) + R"(">
+    <model name="wp_)" + std::to_string(orig_idx) + R"(">
         <static>true</static>
         <link name="link">
         <visual name="v">
-            <pose>)" + std::to_string(waypoints_[current_segment_].x) + " " + 
-                    std::to_string(waypoints_[current_segment_].y) + " " + 
+            <pose>)" + std::to_string(waypoints_original_[orig_idx].x) + " " + 
+                    std::to_string(waypoints_original_[orig_idx].y) + " " + 
                     std::to_string(z) + R"( 0 0 0</pose>
-            <geometry><sphere><radius>0.15</radius></sphere></geometry>
+            <geometry><sphere><radius>0.25</radius></sphere></geometry>
             <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
         </visual>
         </link>
@@ -451,12 +454,12 @@ public:
     </sdf>)";
             
             gazebo_msgs::SpawnModel srv;
-            srv.request.model_name = "wp_" + std::to_string(current_segment_);
+            srv.request.model_name = "wp_" + std::to_string(orig_idx);
             srv.request.model_xml = sdf;
             srv.request.reference_frame = "";
             
             if (spawner.call(srv) && srv.response.success) {
-                spawned_markers_.insert(current_segment_);
+                spawned_markers_.insert(orig_idx);
             }
         }
     }
@@ -572,6 +575,7 @@ private:
     double pose_z_ = 0;
     std::set<int> spawned_markers_;
     int last_drawn_segment_ = -1;
+    std::vector<Point2D> waypoints_original_;
 
 
     ros::Publisher marker_pub_;
