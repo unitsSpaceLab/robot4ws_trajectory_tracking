@@ -187,7 +187,8 @@ enum class TrackingStatus {
     NOWAYPOINTFOUND,
     INITIALIZED,
     COMPLETE,
-    STUCK
+    STUCK,
+    NONE
 };
 
 
@@ -249,7 +250,7 @@ public:
         if (show_rviz_) {
             marker_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/trajectory_markers", 1);
         }
-        status_pub_ = nh.advertise<std_msgs::String>("/trajectory_tracker/status", 1);
+        status_pub_ = nh.advertise<std_msgs::String>("/trajectory_tracker/status", 1, true);
 
         // Call kinematic mode service
         setKinematicMode(kinematic_mode_);
@@ -614,9 +615,12 @@ public:
     }   
 
     void publishStatus() {
+        if (tracking_status_ == last_published_status_) return;
+        
         std_msgs::String msg;
         msg.data = statusToString(tracking_status_);
         status_pub_.publish(msg);
+        last_published_status_ = tracking_status_;
     }
 
 
@@ -653,7 +657,8 @@ private:
     ros::Subscriber link_states_sub_;
 
     ros::Publisher status_pub_;
-    TrackingStatus tracking_status_ = TrackingStatus::INITIALIZED;   
+    TrackingStatus tracking_status_ = TrackingStatus::INITIALIZED;  
+    TrackingStatus last_published_status_ = TrackingStatus::NONE;
 };
 
 int main(int argc, char** argv) {
